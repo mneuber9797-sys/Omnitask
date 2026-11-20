@@ -480,6 +480,37 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# --- Passwort-Abfrage ---
+def passwort_pruefen():
+    try:
+        richtiges_passwort = st.secrets["APP_PASSWORD"].strip()
+    except Exception:
+        richtiges_passwort = os.environ.get("APP_PASSWORD", "OmniLex").strip()
+
+    if "eingeloggt" not in st.session_state:
+        st.session_state.eingeloggt = False
+
+    if not st.session_state.eingeloggt:
+        st.markdown(
+            '<div class="omni-header">'
+            '<div><div class="omni-brand">OmniTasks</div>'
+            '<div class="omni-tagline">Eisenhower-Priorisierung · Leonard & Max</div></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        col_l, _ = st.columns([1.2, 1])
+        with col_l:
+            eingabe = st.text_input("Zugangspasswort:", type="password", placeholder="Passwort eingeben...")
+            if st.button("Entsperren", use_container_width=True):
+                if eingabe == richtiges_passwort:
+                    st.session_state.eingeloggt = True
+                    st.rerun()
+                else:
+                    st.error("Falsches Passwort.")
+        st.stop()
+
+passwort_pruefen()
+
 # --- Datenbank-Verbindung (Neon PostgreSQL) ---
 def get_db_url():
     try:
