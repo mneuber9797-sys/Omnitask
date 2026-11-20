@@ -205,6 +205,24 @@ st.markdown(
         background: rgba(30, 41, 59, 0.85) !important;
     }
 
+    /* Ein- und Ausziehpfeil für die Aufgabenbereiche */
+    .st-key-toggle_areas_open button,
+    .st-key-toggle_areas_close button {
+        font-size: 0.86rem !important;
+        padding: 0.34rem 0.8rem !important;
+        border-radius: 10px !important;
+        color: #E2E8F0 !important;
+        background: linear-gradient(180deg, #161E30 0%, #0C101B 100%) !important;
+        border: 1px solid rgba(148, 163, 184, 0.38) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38) !important;
+    }
+
+    .st-key-toggle_areas_open button:hover,
+    .st-key-toggle_areas_close button:hover {
+        border-color: #38BDF8 !important;
+        color: #FFFFFF !important;
+    }
+
     .section-title {
         font-size: 1.15rem;
         font-weight: 700;
@@ -850,11 +868,13 @@ def sortiere_abc_spalte(aufgaben_liste):
         ),
     )
 
-# --- Session State für Navigation & Personenfilter ---
+# --- Session State für Navigation, Personenfilter & Ein-/Ausklappen der Bereiche ---
 if "selected_area" not in st.session_state:
     st.session_state.selected_area = None
 if "assignee_filter" not in st.session_state:
     st.session_state.assignee_filter = None
+if "show_areas" not in st.session_state:
+    st.session_state.show_areas = False
 
 alle_tasks = lade_alle_offenen_aufgaben()
 aktiver_bereich_name = st.session_state.selected_area
@@ -925,14 +945,14 @@ else:
         )
 
 # ==============================================================================
-# ANSICHT A: STARTBILDSCHIRM (LINKS TOP 10 · RECHTS 5 UNTERNEHMENSBEREICHE)
+# ANSICHT A: STARTBILDSCHIRM (PRIORITÄTENLISTE + EIN-/AUSKLAPPBARE BEREICHE)
 # ==============================================================================
 if aktiver_bereich_name is None:
-    col_left, col_right = st.columns([1.45, 1.0], gap="large")
+    aktiver_filter = st.session_state.assignee_filter
+    gefilterte_tasks = [t for t in alle_tasks if person_wirkt_mit(t, aktiver_filter)]
+    top10_tasks = sortiere_aufgaben_standard(gefilterte_tasks)[:10]
 
-    # --- LINKS: Top 10 wichtigste Aufgaben bereichsübergreifend ---
-    with col_left:
-        aktiver_filter = st.session_state.assignee_filter
+    def render_top10_list(compact: bool):
         if aktiver_filter:
             st.markdown(
                 f'<div class="section-title">🔥 Top 10 wichtigste Aufgaben · Filter: <span style="color:#38BDF8;">{html.escape(aktiver_filter)}</span></div>',
@@ -941,15 +961,13 @@ if aktiver_bereich_name is None:
         else:
             st.markdown('<div class="section-title">🔥 Top 10 wichtigste Aufgaben (bereichsübergreifend)</div>', unsafe_allow_html=True)
 
-        gefilterte_tasks = [t for t in alle_tasks if person_wirkt_mit(t, aktiver_filter)]
-        top10_tasks = sortiere_aufgaben_standard(gefilterte_tasks)[:10]
-
         if not top10_tasks:
             if aktiver_filter:
                 st.info(f"Keine offenen Aufgaben gefunden, an denen {aktiver_filter} aktuell mitwirkt. Klicke oben erneut auf „{aktiver_filter}“, um wieder alle Aufgaben zu sehen.")
             else:
                 st.info("Aktuell sind keine offenen Aufgaben vorhanden. Trage unten über die Eingabemaske eure erste Aufgabe ein.")
         else:
+            ratio = [5.2, 0.8] if compact else [5.55, 0.45]
             for idx, task in enumerate(top10_tasks, start=1):
                 a_info = AREA_BY_NAME.get(task["area"], AREAS[0])
                 abc = task["abc"]
@@ -959,7 +977,7 @@ if aktiver_bereich_name is None:
                     done_subs = sum(1 for s in subs if s["is_done"])
                     sub_txt = f' · Unteraufgaben: <b>{done_subs}/{len(subs)}</b>'
 
-                c_card, c_done = st.columns([5.2, 0.8])
+                c_card, c_done = st.columns(ratio)
                 with c_card:
                     st.markdown(
                         f'<div class="top10-card" style="--accent:{a_info["color"]};--bg-tint:{a_info["bg_tint"]};">'
@@ -982,30 +1000,54 @@ if aktiver_bereich_name is None:
                         schliesse_aufgabe_ab(task["id"])
                         st.rerun()
 
-    # --- RECHTS: Anklickbare Felder für die 5 Unternehmensbereiche ---
-    with col_right:
-        st.markdown('<div class="section-title">🏢 Unternehmensbereiche (Eisenhower-Matrizen)</div>', unsafe_allow_html=True)
-        for area in AREAS:
-            area_tasks = [t for t in alle_tasks if t["area"] == area["name"]]
-            cnt_a = sum(1 for t in area_tasks if t["abc"] == "A")
-            cnt_b = sum(1 for t in area_tasks if t["abc"] == "B")
-            cnt_c = sum(1 for t in area_tasks if t["abc"] == "C")
-
-            st.markdown(
-                f'<div class="area-card" style="--accent:{area["color"]};--bg-tint:{area["bg_tint"]};">'
-                f'<div class="area-card-header">'
-                f'<div class="area-card-title">{area["icon"]} {html.escape(area["name"])}</div>'
-                f'<div class="area-card-count">{len(area_tasks)} offen</div>'
-                f'</div>'
-                f'<div class="area-card-stats">'
-                f'A-Aufgaben: <b>{cnt_a}</b> · B-Aufgaben: <b>{cnt_b}</b> · C-Aufgaben: <b>{cnt_c}</b>'
-                f'</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-            if st.button(f"Matrix „{area['name']}“ öffnen →", key=f"open_area_{area['name']}", use_container_width=True):
-                st.session_state.selected_area = area["name"]
+    # Zustand 1: Aufgabenbereiche eingeklappt (Standard beim Öffnen der App)
+    if not st.session_state.show_areas:
+        col_head_l, col_head_r = st.columns([4.7, 1.3])
+        with col_head_r:
+            if st.button("◀ Aufgabenbereiche", key="toggle_areas_open", help="Unternehmensbereiche & Eisenhower-Matrizen ausziehen", use_container_width=True):
+                st.session_state.show_areas = True
                 st.rerun()
+        with col_head_l:
+            pass
+        render_top10_list(compact=False)
+
+    # Zustand 2: Aufgabenbereiche ausgezogen (2-Spalten-Ansicht)
+    else:
+        col_left, col_right = st.columns([1.45, 1.0], gap="large")
+
+        with col_left:
+            render_top10_list(compact=True)
+
+        with col_right:
+            r_title, r_toggle = st.columns([4.4, 0.9])
+            with r_title:
+                st.markdown('<div class="section-title">🏢 Aufgabenbereiche</div>', unsafe_allow_html=True)
+            with r_toggle:
+                if st.button("▶", key="toggle_areas_close", help="Aufgabenbereiche wieder einklappen", use_container_width=True):
+                    st.session_state.show_areas = False
+                    st.rerun()
+
+            for area in AREAS:
+                area_tasks = [t for t in alle_tasks if t["area"] == area["name"]]
+                cnt_a = sum(1 for t in area_tasks if t["abc"] == "A")
+                cnt_b = sum(1 for t in area_tasks if t["abc"] == "B")
+                cnt_c = sum(1 for t in area_tasks if t["abc"] == "C")
+
+                st.markdown(
+                    f'<div class="area-card" style="--accent:{area["color"]};--bg-tint:{area["bg_tint"]};">'
+                    f'<div class="area-card-header">'
+                    f'<div class="area-card-title">{area["icon"]} {html.escape(area["name"])}</div>'
+                    f'<div class="area-card-count">{len(area_tasks)} offen</div>'
+                    f'</div>'
+                    f'<div class="area-card-stats">'
+                    f'A-Aufgaben: <b>{cnt_a}</b> · B-Aufgaben: <b>{cnt_b}</b> · C-Aufgaben: <b>{cnt_c}</b>'
+                    f'</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                if st.button(f"Matrix „{area['name']}“ öffnen →", key=f"open_area_{area['name']}", use_container_width=True):
+                    st.session_state.selected_area = area["name"]
+                    st.rerun()
 
 # ==============================================================================
 # ANSICHT B: EISENHOWER-MATRIX & ABC-TABELLE FÜR EINEN UNTERNEHMENSBEREICH
