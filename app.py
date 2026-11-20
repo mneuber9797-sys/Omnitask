@@ -1,7 +1,9 @@
 import os
 import html
 import time
+import calendar
 import datetime
+from zoneinfo import ZoneInfo
 import streamlit as st
 import psycopg2
 from psycopg2 import pool
@@ -9,6 +11,8 @@ from psycopg2.extras import RealDictCursor
 
 # --- Seiten-Konfiguration ---
 st.set_page_config(page_title="OmniTasks", layout="wide")
+
+BERLIN_TZ = ZoneInfo("Europe/Berlin")
 
 # --- Unternehmensbereiche & Farb-Akzente ---
 AREAS = [
@@ -59,6 +63,63 @@ DURATION_UNITS = {
     "Tage": 1440,
     "Wochen": 10080,
 }
+
+# --- Deadline- & Dringlichkeits-Eskalationslogik ---
+def einen_monat_vorher(d: datetime.date) -> datetime.date:
+    year = d.year
+    month = d.month - 1
+    if month == 0:
+        month = 12
+        year -= 1
+    max_day = calendar.monthrange(year, month)[1]
+    return datetime.date(year, month, min(d.day, max_day))
+
+def berechne_effektive_dringlichkeit(
+    base_urgency: int,
+    deadline: datetime.date | None,
+    heute: datetime.date | None = None,
+) -> tuple[int, str | None]:
+    """
+    Erhöht die Dringlichkeit automatisch bei Annäherung an die Deadline:
+    - Ab 1 Monat vor Deadline: mindestens Note 4
+    - Ab 1 Woche (7 Tage) vor Deadline: mindestens Note 5
+    """
+    u = int(base_urgency)
+    if deadline is None:
+        return u, None
+    if isinstance(deadline, datetime.datetime):
+        deadline = deadline.date()
+    if heute is None:
+        heute = datetime.datetime.now(BERLIN_TZ).date()
+
+    eine_woche_vorher = deadline - datetime.timedelta(days=7)
+    ein_monat_vorher = einen_monat_vorher(deadline)
+
+    if heute >= eine_woche_vorher:
+        eff = max(u, 5)
+        stage = "week_boost" if eff > u else "week_active"
+        return eff, stage
+    if heute >= ein_monat_vorher:
+        eff = max(u, 4)
+        stage = "month_boost" if eff > u else "month_active"
+        return eff, stage
+    return u, "scheduled"
+
+def baue_deadline_badge_html(deadline: datetime.date | None, stage: str | None) -> str:
+    if deadline is None:
+        return ""
+    if isinstance(deadline, datetime.datetime):
+        deadline = deadline.date()
+    d_str = deadline.strftime("%d.%m.%Y")
+    if stage == "week_boost":
+        return f'<span class="deadline-pill-urgent">🚨 {d_str} (Dringlichkeit ↑ 5)</span>'
+    if stage == "week_active":
+        return f'<span class="deadline-pill-urgent">🚨 {d_str}</span>'
+    if stage == "month_boost":
+        return f'<span class="deadline-pill-soon">⏳ {d_str} (Dringlichkeit ↑ 4)</span>'
+    if stage == "month_active":
+        return f'<span class="deadline-pill-soon">⏳ {d_str}</span>'
+    return f'<span class="deadline-pill">📅 {d_str}</span>'
 
 # --- ABC-Klassifikationslogik ---
 def berechne_abc_kategorie(wichtigkeit: int, dringlichkeit: int, override: str | None = None) -> str:
@@ -292,6 +353,39 @@ st.markdown(
         color: #E2E8F0;
         background: rgba(255, 255, 255, 0.07);
         border: 1px solid rgba(255, 255, 255, 0.16);
+    }
+
+    .deadline-pill {
+        display: inline-block;
+        padding: 0.12rem 0.52rem;
+        border-radius: 7px;
+        font-weight: 600;
+        font-size: 0.74rem;
+        color: #CBD5E1;
+        background: rgba(148, 163, 184, 0.12);
+        border: 1px solid rgba(148, 163, 184, 0.28);
+    }
+
+    .deadline-pill-soon {
+        display: inline-block;
+        padding: 0.12rem 0.52rem;
+        border-radius: 7px;
+        font-weight: 700;
+        font-size: 0.74rem;
+        color: #FDE047;
+        background: rgba(250, 204, 21, 0.14);
+        border: 1px solid rgba(250, 204, 21, 0.42);
+    }
+
+    .deadline-pill-urgent {
+        display: inline-block;
+        padding: 0.12rem 0.52rem;
+        border-radius: 7px;
+        font-weight: 700;
+        font-size: 0.74rem;
+        color: #FCA5A5;
+        background: rgba(239, 68, 68, 0.18);
+        border: 1px solid rgba(239, 68, 68, 0.48);
     }
 
     .abc-tag-A {
@@ -543,6 +637,7 @@ st.markdown(
     .movable-task-meta {
         display: flex;
         flex-wrap: wrap;
+        align-items: center;
         gap: 0.45rem;
         font-size: 0.78rem;
         color: #94A3B8;
@@ -662,12 +757,14 @@ def init_db():
                     importance INTEGER NOT NULL DEFAULT 3,
                     urgency INTEGER NOT NULL DEFAULT 3,
                     duration_minutes INTEGER NOT NULL DEFAULT 30,
+                    deadline DATE,
                     abc_override TEXT,
                     manual_order INTEGER,
                     is_done BOOLEAN NOT NULL DEFAULT FALSE,
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 );
             """)
+            cur.execute("ALTER TABLE omni_tasks ADD COLUMN IF NOT EXISTS deadline DATE;")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS omni_subtasks (
                     id SERIAL PRIMARY KEY,
@@ -695,6 +792,7 @@ except Exception as e:
 
 # --- Datenbank-Funktionen ---
 def lade_alle_offenen_aufgaben():
+    heute_berlin = datetime.datetime.now(BERLIN_TZ).date()
     conn = get_connection()
     broken = False
     try:
@@ -722,8 +820,13 @@ def lade_alle_offenen_aufgaben():
 
         for t in tasks:
             t["subtasks"] = sub_map.get(t["id"], [])
-            t["total_score"] = int(t["importance"]) + int(t["urgency"])
-            t["abc"] = berechne_abc_kategorie(t["importance"], t["urgency"], t.get("abc_override"))
+            base_u = int(t["urgency"])
+            eff_u, stage = berechne_effektive_dringlichkeit(base_u, t.get("deadline"), heute=heute_berlin)
+            t["base_urgency"] = base_u
+            t["urgency"] = eff_u
+            t["deadline_stage"] = stage
+            t["total_score"] = int(t["importance"]) + eff_u
+            t["abc"] = berechne_abc_kategorie(t["importance"], eff_u, t.get("abc_override"))
 
         return tasks
     except Exception:
@@ -732,18 +835,20 @@ def lade_alle_offenen_aufgaben():
     finally:
         release_connection(conn, broken=broken)
 
-def erstelle_aufgabe_mit_unteraufgaben(area, title, assignee, importance, urgency, duration_minutes, subtasks_list):
+def erstelle_aufgabe_mit_unteraufgaben(
+    area, title, assignee, importance, urgency, duration_minutes, subtasks_list, deadline=None
+):
     conn = get_connection()
     broken = False
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO omni_tasks (area, title, assignee, importance, urgency, duration_minutes)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO omni_tasks (area, title, assignee, importance, urgency, duration_minutes, deadline)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING id;
                 """,
-                (area, title.strip(), assignee, int(importance), int(urgency), int(duration_minutes)),
+                (area, title.strip(), assignee, int(importance), int(urgency), int(duration_minutes), deadline),
             )
             task_id = cur.fetchone()[0]
             for st_title in subtasks_list:
@@ -977,6 +1082,8 @@ if aktiver_bereich_name is None:
                     done_subs = sum(1 for s in subs if s["is_done"])
                     sub_txt = f' · Unteraufgaben: <b>{done_subs}/{len(subs)}</b>'
 
+                deadline_badge = baue_deadline_badge_html(task.get("deadline"), task.get("deadline_stage"))
+
                 c_card, c_done = st.columns(ratio)
                 with c_card:
                     st.markdown(
@@ -990,6 +1097,7 @@ if aktiver_bereich_name is None:
                         f'<span class="assignee-pill">👤 {html.escape(task["assignee"])}</span>'
                         f'<span>Wichtigkeit: <b>{task["importance"]}</b> · Dringlichkeit: <b>{task["urgency"]}</b> (Σ {task["total_score"]})</span>'
                         f'<span>⏱️ {formatiere_zeit(task["duration_minutes"])}{sub_txt}</span>'
+                        f'{deadline_badge}'
                         f'</div>'
                         f'</div>',
                         unsafe_allow_html=True,
@@ -1083,7 +1191,8 @@ else:
             zone = berechne_abc_kategorie(w, d)
             dots = []
             for t in cell_tasks[(w, d)]:
-                tooltip = html.escape(f"{t['title']} ({t['assignee']} · {formatiere_zeit(t['duration_minutes'])})")
+                dl_tip = f" · Deadline: {t['deadline'].strftime('%d.%m.%Y')}" if t.get("deadline") else ""
+                tooltip = html.escape(f"{t['title']} ({t['assignee']} · {formatiere_zeit(t['duration_minutes'])}{dl_tip})")
                 dots.append(f'<span class="task-dot" title="{tooltip}"></span>')
             dots_html = "".join(dots)
             tds.append(
@@ -1142,6 +1251,8 @@ else:
 
             for idx, task in enumerate(kat_liste):
                 tid = task["id"]
+                deadline_badge = baue_deadline_badge_html(task.get("deadline"), task.get("deadline_stage"))
+
                 st.markdown(
                     f'<div class="movable-task-card" style="--accent:{accent};">'
                     f'<div class="movable-task-top">'
@@ -1151,6 +1262,7 @@ else:
                     f'<div class="movable-task-meta">'
                     f'<span>W: <b>{task["importance"]}</b> · D: <b>{task["urgency"]}</b> (Σ {task["total_score"]})</span>'
                     f'<span>⏱️ {formatiere_zeit(task["duration_minutes"])}</span>'
+                    f'{deadline_badge}'
                     f'</div>'
                     f'</div>',
                     unsafe_allow_html=True,
@@ -1197,7 +1309,7 @@ else:
                 st.markdown('<div style="height:0.35rem;"></div>', unsafe_allow_html=True)
 
 # ==============================================================================
-# UNTEN: EINGABEMASKE FÜR AUFGABEN & UNTERAUFGABEN (FELDER 1 BIS 5)
+# UNTEN: EINGABEMASKE FÜR AUFGABEN & UNTERAUFGABEN
 # ==============================================================================
 st.markdown("---")
 st.markdown('<div class="section-title">➕ Neue Aufgabe oder Unteraufgabe anlegen</div>', unsafe_allow_html=True)
@@ -1213,7 +1325,7 @@ default_area_idx = AREA_NAMES.index(aktiver_bereich_name) if aktiver_bereich_nam
 
 if eingabe_modus == "Neue Hauptaufgabe (optional inkl. Unteraufgaben)":
     with st.form("neue_aufgabe_form", clear_on_submit=True):
-        r1_c1, r1_c2, r1_c3 = st.columns([1.4, 2.4, 1.2])
+        r1_c1, r1_c2, r1_c3, r1_c4 = st.columns([1.3, 2.3, 1.1, 1.2])
 
         # Feld 1: Unternehmensbereich
         feld_1_bereich = r1_c1.selectbox(
@@ -1235,32 +1347,40 @@ if eingabe_modus == "Neue Hauptaufgabe (optional inkl. Unteraufgaben)":
             index=0,
         )
 
+        # Feld 4: Deadline (optional: Tag, Monat, Jahr)
+        feld_4_deadline = r1_c4.date_input(
+            "4. Deadline (optional)",
+            value=None,
+            format="DD.MM.YYYY",
+            help="Optionales Zieldatum (TT.MM.JJJJ): 1 Monat vorher steigt die Dringlichkeit auf mindestens 4, 1 Woche vorher auf 5.",
+        )
+
         r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns([1.0, 1.0, 0.9, 1.05, 2.25])
 
-        # Feld 4: Wichtigkeit (1-5) & Dringlichkeit (1-5)
-        feld_4_wichtigkeit = r2_c1.selectbox(
-            "4a. Wichtigkeit (1–5)",
+        # Feld 5: Wichtigkeit (1-5) & Dringlichkeit (1-5)
+        feld_5_wichtigkeit = r2_c1.selectbox(
+            "5a. Wichtigkeit (1–5)",
             [5, 4, 3, 2, 1],
             index=1,
             help="5 = sehr wichtig, 1 = wenig wichtig",
         )
-        feld_4_dringlichkeit = r2_c2.selectbox(
-            "4b. Dringlichkeit (1–5)",
+        feld_5_dringlichkeit = r2_c2.selectbox(
+            "5b. Dringlichkeit (1–5)",
             [5, 4, 3, 2, 1],
             index=1,
             help="5 = sehr dringend, 1 = wenig dringend",
         )
 
-        # Feld 5: Ungefährer Zeitaufwand (Wert + Einheit: Minuten, Stunden, Tage, Wochen)
-        feld_5_zeit_wert = r2_c3.number_input(
-            "5a. Zeitaufwand",
+        # Feld 6: Ungefährer Zeitaufwand (Wert + Einheit: Minuten, Stunden, Tage, Wochen)
+        feld_6_zeit_wert = r2_c3.number_input(
+            "6a. Zeitaufwand",
             min_value=1,
             max_value=1000,
             value=30,
             step=1,
         )
-        feld_5_zeit_einheit = r2_c4.selectbox(
-            "5b. Einheit",
+        feld_6_zeit_einheit = r2_c4.selectbox(
+            "6b. Einheit",
             list(DURATION_UNITS.keys()),
             index=0,
         )
@@ -1276,16 +1396,17 @@ if eingabe_modus == "Neue Hauptaufgabe (optional inkl. Unteraufgaben)":
             if not feld_2_aufgabe.strip():
                 st.warning("Bitte gib in Feld 2 einen Namen für die Aufgabe ein.")
             else:
-                gesamt_minuten = int(feld_5_zeit_wert) * DURATION_UNITS[feld_5_zeit_einheit]
+                gesamt_minuten = int(feld_6_zeit_wert) * DURATION_UNITS[feld_6_zeit_einheit]
                 sub_liste = [s.strip() for s in unteraufgaben_raw.split(",") if s.strip()]
                 erstelle_aufgabe_mit_unteraufgaben(
                     area=feld_1_bereich,
                     title=feld_2_aufgabe,
                     assignee=feld_3_zustaendig,
-                    importance=feld_4_wichtigkeit,
-                    urgency=feld_4_dringlichkeit,
+                    importance=feld_5_wichtigkeit,
+                    urgency=feld_5_dringlichkeit,
                     duration_minutes=gesamt_minuten,
                     subtasks_list=sub_liste,
+                    deadline=feld_4_deadline,
                 )
                 st.rerun()
 
