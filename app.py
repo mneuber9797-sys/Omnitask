@@ -97,6 +97,18 @@ def formatiere_zeit(minuten: int) -> str:
         return f"{stunden} Std. {rest_min} Min."
     return f"{m} Min."
 
+def person_wirkt_mit(task: dict, person: str | None) -> bool:
+    """Prüft, ob die gewählte Person bei der Hauptaufgabe oder einer Unteraufgabe mitwirkt."""
+    if not person:
+        return True
+    p_low = person.strip().lower()
+    if p_low in str(task.get("assignee", "")).lower():
+        return True
+    for sub in task.get("subtasks", []):
+        if p_low in str(sub.get("assignee", "")).lower():
+            return True
+    return False
+
 # --- Basis-CSS (Tiefschwarzes Layout mit klaren Akzenten) ---
 st.markdown(
     """
@@ -139,6 +151,12 @@ st.markdown(
         border-bottom: 1.5px solid rgba(226, 232, 240, 0.24);
     }
 
+    .omni-header-line {
+        border-bottom: 1.5px solid rgba(226, 232, 240, 0.24);
+        margin-top: 0.55rem;
+        margin-bottom: 1.2rem;
+    }
+
     .omni-brand {
         display: inline-block;
         font-size: 2.25rem;
@@ -155,6 +173,36 @@ st.markdown(
         color: #94A3B8;
         margin-top: 0.12rem;
         letter-spacing: 0.03em;
+        line-height: 1.4;
+    }
+
+    /* Filter-Buttons neben der Unterzeile in exakt 0.88rem */
+    .st-key-filter_btn_Leonard button,
+    .st-key-filter_btn_Max button {
+        font-size: 0.88rem !important;
+        line-height: 1.3 !important;
+        padding: 0.22rem 0.65rem !important;
+        min-height: 0 !important;
+        height: auto !important;
+        border-radius: 8px !important;
+        letter-spacing: 0.03em !important;
+        color: #94A3B8 !important;
+        background: rgba(16, 20, 31, 0.75) !important;
+        border: 1px solid rgba(148, 163, 184, 0.28) !important;
+        box-shadow: none !important;
+    }
+
+    .st-key-filter_btn_Leonard button p,
+    .st-key-filter_btn_Max button p {
+        font-size: 0.88rem !important;
+        line-height: 1.3 !important;
+    }
+
+    .st-key-filter_btn_Leonard button:hover,
+    .st-key-filter_btn_Max button:hover {
+        color: #F8FAFC !important;
+        border-color: rgba(226, 232, 240, 0.65) !important;
+        background: rgba(30, 41, 59, 0.85) !important;
     }
 
     .section-title {
@@ -802,9 +850,11 @@ def sortiere_abc_spalte(aufgaben_liste):
         ),
     )
 
-# --- Session State für Navigation ---
+# --- Session State für Navigation & Personenfilter ---
 if "selected_area" not in st.session_state:
     st.session_state.selected_area = None
+if "assignee_filter" not in st.session_state:
+    st.session_state.assignee_filter = None
 
 alle_tasks = lade_alle_offenen_aufgaben()
 aktiver_bereich_name = st.session_state.selected_area
@@ -816,14 +866,47 @@ if aktiver_bereich_name and aktiver_bereich_name not in AREA_BY_NAME:
 # KOPFZEILE
 # ==============================================================================
 if aktiver_bereich_name is None:
-    st.markdown(
-        '<div class="omni-header">'
-        '<div><div class="omni-brand">OmniTasks</div>'
-        '<div class="omni-tagline">Eisenhower-Priorisierung · Leonard & Max</div></div>'
-        f'<div style="color:#94A3B8;font-size:0.88rem;font-weight:600;">{len(alle_tasks)} offene Aufgaben gesamt</div>'
-        '</div>',
-        unsafe_allow_html=True,
-    )
+    aktiver_filter = st.session_state.assignee_filter
+    if aktiver_filter in ("Leonard", "Max"):
+        st.markdown(
+            f"""
+            <style>
+            .st-key-filter_btn_{aktiver_filter} button {{
+                color: #F8FAFC !important;
+                background: rgba(56, 189, 248, 0.18) !important;
+                border-color: #38BDF8 !important;
+                box-shadow: 0 0 12px rgba(56, 189, 248, 0.25) !important;
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    col_h_brand, col_h_leo, col_h_max, col_h_count = st.columns([2.35, 0.58, 0.50, 2.57])
+    with col_h_brand:
+        st.markdown(
+            '<div class="omni-brand">OmniTasks</div>'
+            '<div class="omni-tagline">Eisenhower-Priorisierung · Leonard & Max</div>',
+            unsafe_allow_html=True,
+        )
+    with col_h_leo:
+        st.markdown('<div style="height:2.92rem;"></div>', unsafe_allow_html=True)
+        if st.button("Leonard", key="filter_btn_Leonard", help="Nur Aufgaben mit Leonard anzeigen (erneut klicken zum Zurücksetzen)", use_container_width=True):
+            st.session_state.assignee_filter = None if st.session_state.assignee_filter == "Leonard" else "Leonard"
+            st.rerun()
+    with col_h_max:
+        st.markdown('<div style="height:2.92rem;"></div>', unsafe_allow_html=True)
+        if st.button("Max", key="filter_btn_Max", help="Nur Aufgaben mit Max anzeigen (erneut klicken zum Zurücksetzen)", use_container_width=True):
+            st.session_state.assignee_filter = None if st.session_state.assignee_filter == "Max" else "Max"
+            st.rerun()
+    with col_h_count:
+        st.markdown('<div style="height:3.08rem;"></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="text-align:right;color:#94A3B8;font-size:0.88rem;font-weight:600;">{len(alle_tasks)} offene Aufgaben gesamt</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('<div class="omni-header-line"></div>', unsafe_allow_html=True)
 else:
     area_cfg = AREA_BY_NAME[aktiver_bereich_name]
     col_back, col_title = st.columns([1.3, 4.7])
@@ -849,11 +932,23 @@ if aktiver_bereich_name is None:
 
     # --- LINKS: Top 10 wichtigste Aufgaben bereichsübergreifend ---
     with col_left:
-        st.markdown('<div class="section-title">🔥 Top 10 wichtigste Aufgaben (bereichsübergreifend)</div>', unsafe_allow_html=True)
-        top10_tasks = sortiere_aufgaben_standard(alle_tasks)[:10]
+        aktiver_filter = st.session_state.assignee_filter
+        if aktiver_filter:
+            st.markdown(
+                f'<div class="section-title">🔥 Top 10 wichtigste Aufgaben · Filter: <span style="color:#38BDF8;">{html.escape(aktiver_filter)}</span></div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown('<div class="section-title">🔥 Top 10 wichtigste Aufgaben (bereichsübergreifend)</div>', unsafe_allow_html=True)
+
+        gefilterte_tasks = [t for t in alle_tasks if person_wirkt_mit(t, aktiver_filter)]
+        top10_tasks = sortiere_aufgaben_standard(gefilterte_tasks)[:10]
 
         if not top10_tasks:
-            st.info("Aktuell sind keine offenen Aufgaben vorhanden. Trage unten über die Eingabemaske eure erste Aufgabe ein.")
+            if aktiver_filter:
+                st.info(f"Keine offenen Aufgaben gefunden, an denen {aktiver_filter} aktuell mitwirkt. Klicke oben erneut auf „{aktiver_filter}“, um wieder alle Aufgaben zu sehen.")
+            else:
+                st.info("Aktuell sind keine offenen Aufgaben vorhanden. Trage unten über die Eingabemaske eure erste Aufgabe ein.")
         else:
             for idx, task in enumerate(top10_tasks, start=1):
                 a_info = AREA_BY_NAME.get(task["area"], AREAS[0])
