@@ -53,6 +53,13 @@ AREA_BY_NAME = {a["name"]: a for a in AREAS}
 AREA_NAMES = [a["name"] for a in AREAS]
 ASSIGNEES = ["Leonard", "Max", "Leonard & Max"]
 
+DURATION_UNITS = {
+    "Minuten": 1,
+    "Stunden": 60,
+    "Tage": 1440,
+    "Wochen": 10080,
+}
+
 # --- ABC-Klassifikationslogik ---
 def berechne_abc_kategorie(wichtigkeit: int, dringlichkeit: int, override: str | None = None) -> str:
     if override in ("A", "B", "C"):
@@ -67,13 +74,28 @@ def berechne_abc_kategorie(wichtigkeit: int, dringlichkeit: int, override: str |
 
 def formatiere_zeit(minuten: int) -> str:
     m = max(1, int(minuten))
-    if m < 60:
-        return f"{m} Min."
-    stunden = m // 60
-    rest = m % 60
-    if rest == 0:
-        return f"{stunden} Std."
-    return f"{stunden} Std. {rest} Min."
+    if m >= 10080:
+        wochen = m // 10080
+        rest_tage = (m % 10080) // 1440
+        w_label = "1 Woche" if wochen == 1 else f"{wochen} Wochen"
+        if rest_tage == 0:
+            return w_label
+        t_label = "1 Tag" if rest_tage == 1 else f"{rest_tage} Tage"
+        return f"{w_label} {t_label}"
+    if m >= 1440:
+        tage = m // 1440
+        rest_std = (m % 1440) // 60
+        t_label = "1 Tag" if tage == 1 else f"{tage} Tage"
+        if rest_std == 0:
+            return t_label
+        return f"{t_label} {rest_std} Std."
+    if m >= 60:
+        stunden = m // 60
+        rest_min = m % 60
+        if rest_min == 0:
+            return f"{stunden} Std."
+        return f"{stunden} Std. {rest_min} Min."
+    return f"{m} Min."
 
 # --- Basis-CSS (Tiefschwarzes Layout mit klaren Akzenten) ---
 st.markdown(
@@ -1076,7 +1098,7 @@ if eingabe_modus == "Neue Hauptaufgabe (optional inkl. Unteraufgaben)":
             index=0,
         )
 
-        r2_c1, r2_c2, r2_c3, r2_c4 = st.columns([1.1, 1.1, 1.2, 2.6])
+        r2_c1, r2_c2, r2_c3, r2_c4, r2_c5 = st.columns([1.0, 1.0, 0.9, 1.05, 2.25])
 
         # Feld 4: Wichtigkeit (1-5) & Dringlichkeit (1-5)
         feld_4_wichtigkeit = r2_c1.selectbox(
@@ -1092,17 +1114,22 @@ if eingabe_modus == "Neue Hauptaufgabe (optional inkl. Unteraufgaben)":
             help="5 = sehr dringend, 1 = wenig dringend",
         )
 
-        # Feld 5: Ungefährer Zeitaufwand
-        feld_5_zeit = r2_c3.number_input(
-            "5. Zeitaufwand (Min.)",
-            min_value=5,
-            max_value=1440,
+        # Feld 5: Ungefährer Zeitaufwand (Wert + Einheit: Minuten, Stunden, Tage, Wochen)
+        feld_5_zeit_wert = r2_c3.number_input(
+            "5a. Zeitaufwand",
+            min_value=1,
+            max_value=1000,
             value=30,
-            step=5,
+            step=1,
+        )
+        feld_5_zeit_einheit = r2_c4.selectbox(
+            "5b. Einheit",
+            list(DURATION_UNITS.keys()),
+            index=0,
         )
 
         # Optionale Unteraufgaben direkt mit anlegen
-        unteraufgaben_raw = r2_c4.text_input(
+        unteraufgaben_raw = r2_c5.text_input(
             "Unteraufgaben (optional, mit Komma trennen)",
             placeholder="z. B. Belege sammeln, Steuerberater mailen",
         )
@@ -1112,6 +1139,7 @@ if eingabe_modus == "Neue Hauptaufgabe (optional inkl. Unteraufgaben)":
             if not feld_2_aufgabe.strip():
                 st.warning("Bitte gib in Feld 2 einen Namen für die Aufgabe ein.")
             else:
+                gesamt_minuten = int(feld_5_zeit_wert) * DURATION_UNITS[feld_5_zeit_einheit]
                 sub_liste = [s.strip() for s in unteraufgaben_raw.split(",") if s.strip()]
                 erstelle_aufgabe_mit_unteraufgaben(
                     area=feld_1_bereich,
@@ -1119,7 +1147,7 @@ if eingabe_modus == "Neue Hauptaufgabe (optional inkl. Unteraufgaben)":
                     assignee=feld_3_zustaendig,
                     importance=feld_4_wichtigkeit,
                     urgency=feld_4_dringlichkeit,
-                    duration_minutes=feld_5_zeit,
+                    duration_minutes=gesamt_minuten,
                     subtasks_list=sub_liste,
                 )
                 st.rerun()
