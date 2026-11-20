@@ -170,7 +170,7 @@ def person_wirkt_mit(task: dict, person: str | None) -> bool:
             return True
     return False
 
-# --- Basis-CSS (Tiefschwarzes Layout + Durchstreich- & Flammen-Animation) ---
+# --- Basis-CSS (Tiefschwarzes Layout + schlichtes orangefarbenes Aufglühen) ---
 st.markdown(
     """
     <style>
@@ -304,89 +304,53 @@ st.markdown(
         box-shadow: 0 10px 22px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.06);
     }
 
-    /* --- Durchstreich- & Flammen-Animation beim Abhaken --- */
+    /* --- Schlichtes Durchstreichen + langsam zunehmendes oranges Leuchten bis zum Verschwinden --- */
     @keyframes strikeAcross {
         0%   { width: 0%; opacity: 1; }
         100% { width: 100%; opacity: 1; }
     }
 
-    @keyframes igniteAndBurn {
+    @keyframes orangeGlowFadeOut {
         0% {
-            transform: scale(1);
-            border-color: rgba(148, 163, 184, 0.25);
+            background: linear-gradient(165deg, #10141F 0%, #080A10 100%);
+            border-color: rgba(148, 163, 184, 0.2);
+            border-left-color: var(--accent, #38BDF8);
             box-shadow: 0 10px 22px rgba(0, 0, 0, 0.48);
             opacity: 1;
         }
-        28% {
-            transform: scale(1.012);
-            border-color: #FACC15;
-            border-left-color: #FACC15;
-            box-shadow: 0 0 22px rgba(250, 204, 21, 0.75), inset 0 0 18px rgba(249, 115, 22, 0.45);
+        35% {
+            background: linear-gradient(165deg, #1C130C 0%, #100A06 100%);
+            border-color: rgba(251, 146, 60, 0.55);
+            border-left-color: #FB923C;
+            box-shadow: 0 0 18px rgba(249, 115, 22, 0.35), inset 0 0 16px rgba(249, 115, 22, 0.2);
             opacity: 1;
         }
-        52% {
-            transform: scale(0.995) rotate(-0.35deg);
+        68% {
+            background: linear-gradient(165deg, #2D180A 0%, #1A0D05 100%);
             border-color: #F97316;
-            border-left-color: #EF4444;
-            background: linear-gradient(180deg, #2A1008 0%, #160705 100%);
-            box-shadow: 0 0 34px rgba(239, 68, 68, 0.9), 0 -10px 26px rgba(251, 146, 60, 0.75), inset 0 0 28px rgba(239, 68, 68, 0.65);
-            opacity: 1;
-        }
-        76% {
-            transform: scale(0.965) translateY(-4px) rotate(0.35deg);
-            border-color: #EF4444;
-            background: linear-gradient(180deg, #1E0905 0%, #090404 100%);
-            box-shadow: 0 0 28px rgba(239, 68, 68, 0.6), 0 -18px 34px rgba(249, 115, 22, 0.55);
-            opacity: 0.72;
+            border-left-color: #F97316;
+            box-shadow: 0 0 32px rgba(249, 115, 22, 0.78), inset 0 0 28px rgba(251, 146, 60, 0.45);
+            opacity: 0.96;
         }
         100% {
-            transform: scale(0.9) translateY(-10px);
-            border-color: transparent;
-            box-shadow: none;
+            background: linear-gradient(165deg, #3B1E0B 0%, #221006 100%);
+            border-color: #FB923C;
+            border-left-color: #FB923C;
+            box-shadow: 0 0 42px rgba(249, 115, 22, 0.9), inset 0 0 34px rgba(251, 146, 60, 0.6);
             opacity: 0;
         }
-    }
-
-    @keyframes flameWave {
-        0% {
-            opacity: 0;
-            transform: translateY(100%) scaleY(0.8);
-        }
-        30% {
-            opacity: 0.95;
-            transform: translateY(15%) scaleY(1.1);
-        }
-        55% {
-            opacity: 1;
-            transform: translateY(-5%) scaleY(1.25);
-        }
-        80% {
-            opacity: 0.85;
-            transform: translateY(-25%) scaleY(1.15);
-        }
-        100% {
-            opacity: 0;
-            transform: translateY(-45%) scaleY(0.9);
-        }
-    }
-
-    @keyframes embersRise {
-        0%   { opacity: 0; transform: translateY(12px) scale(0.7); }
-        35%  { opacity: 1; transform: translateY(-2px) scale(1.15); }
-        75%  { opacity: 0.9; transform: translateY(-16px) scale(1.0); }
-        100% { opacity: 0; transform: translateY(-28px) scale(0.5); }
     }
 
     .top10-card-burning {
-        animation: igniteAndBurn 1.45s cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
+        animation: orangeGlowFadeOut 1.6s ease-in-out forwards !important;
         pointer-events: none;
     }
 
     .top10-card-burning .burning-title-text {
         position: relative;
         display: inline-block;
-        color: #CBD5E1;
-        transition: color 0.3s ease;
+        color: #E2E8F0;
+        transition: color 0.4s ease;
     }
 
     .top10-card-burning .burning-title-text::after {
@@ -394,34 +358,10 @@ st.markdown(
         position: absolute;
         left: 0;
         top: 52%;
-        height: 2.5px;
-        background: linear-gradient(90deg, #FFFFFF 0%, #FACC15 60%, #EF4444 100%);
-        box-shadow: 0 0 8px #FACC15;
-        animation: strikeAcross 0.42s ease-out forwards;
-    }
-
-    .flame-sheet {
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        background:
-            radial-gradient(circle at 15% 95%, rgba(250, 204, 21, 0.85) 0%, rgba(249, 115, 22, 0.55) 28%, transparent 62%),
-            radial-gradient(circle at 48% 100%, rgba(254, 240, 138, 0.9) 0%, rgba(239, 68, 68, 0.65) 34%, transparent 68%),
-            radial-gradient(circle at 82% 95%, rgba(250, 204, 21, 0.85) 0%, rgba(249, 115, 22, 0.55) 30%, transparent 64%),
-            linear-gradient(0deg, rgba(239, 68, 68, 0.65) 0%, rgba(249, 115, 22, 0.32) 55%, transparent 100%);
-        mix-blend-mode: screen;
-        animation: flameWave 1.35s ease-in-out 0.12s forwards;
-    }
-
-    .flame-embers {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        justify-content: space-around;
-        align-items: center;
-        font-size: 1.45rem;
-        pointer-events: none;
-        animation: embersRise 1.25s ease-out 0.18s forwards;
+        height: 2px;
+        background: linear-gradient(90deg, #FDBA74 0%, #F97316 100%);
+        box-shadow: 0 0 6px rgba(249, 115, 22, 0.8);
+        animation: strikeAcross 0.45s ease-out forwards;
     }
 
     .top10-top {
@@ -1095,7 +1035,7 @@ def sortiere_abc_spalte(aufgaben_liste):
         ),
     )
 
-# --- Session State für Navigation, Personenfilter, Bereiche & Flammen-Animation ---
+# --- Session State für Navigation, Personenfilter, Bereiche & Ausblend-Animation ---
 if "selected_area" not in st.session_state:
     st.session_state.selected_area = None
 if "assignee_filter" not in st.session_state:
@@ -1216,17 +1156,11 @@ if aktiver_bereich_name is None:
                     f'<span class="burning-title-text">{html.escape(task["title"])}</span>'
                     if ist_brennend else html.escape(task["title"])
                 )
-                fire_layers = (
-                    '<div class="flame-sheet"></div>'
-                    '<div class="flame-embers"><span>🔥</span><span>🔥</span><span>🔥</span><span>🔥</span></div>'
-                    if ist_brennend else ""
-                )
 
                 c_card, c_done = st.columns(ratio)
                 with c_card:
                     st.markdown(
                         f'<div class="{card_cls}" style="--accent:{a_info["color"]};--bg-tint:{a_info["bg_tint"]};">'
-                        f'{fire_layers}'
                         f'<div class="top10-top">'
                         f'<div class="top10-rank-title"><span class="rank-num">#{idx}</span>{title_inner}</div>'
                         f'<span class="abc-tag-{abc}">{abc}-Aufgabe</span>'
@@ -1243,12 +1177,11 @@ if aktiver_bereich_name is None:
                     )
                 with c_done:
                     st.markdown('<div style="height:0.55rem;"></div>', unsafe_allow_html=True)
-                    btn_txt = "🔥" if ist_brennend else "✓"
                     if st.button(
-                        btn_txt,
+                        "✓",
                         key=f"top10_done_{task['id']}",
                         disabled=(burning_id is not None),
-                        help="Aufgabe durchstreichen, verbrennen und löschen",
+                        help="Aufgabe erledigt & entfernen",
                         use_container_width=True,
                     ):
                         st.session_state.burning_task_id = task["id"]
@@ -1583,11 +1516,11 @@ else:
                     st.rerun()
 
 # ==============================================================================
-# NACHLAUF DER FLAMMEN-ANIMATION: TASK ENDGÜLTIG LÖSCHEN & LISTE NACHRÜCKEN LASSEN
+# NACHLAUF DER AUSBLEND-ANIMATION: TASK ENDGÜLTIG LÖSCHEN & LISTE NACHRÜCKEN
 # ==============================================================================
 if st.session_state.burning_task_id is not None:
     target_id = st.session_state.burning_task_id
-    time.sleep(1.5)
+    time.sleep(1.65)
     loesche_aufgabe(target_id)
     st.session_state.burning_task_id = None
     st.rerun()
